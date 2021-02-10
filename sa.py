@@ -1,11 +1,9 @@
-import numpy as np
-import time
 import os
-
 from multiprocessing import Pool
-from tqdm import tqdm
-from keras.models import load_model, Model
+
+from keras.models import Model
 from scipy.stats import gaussian_kde
+from tqdm import tqdm
 
 from utils import *
 
@@ -39,15 +37,15 @@ def _get_saved_path(base_path, dataset, dtype, layer_names):
 
 
 def get_ats(
-    model,
-    dataset,
-    name,
-    layer_names,
-    save_path=None,
-    batch_size=128,
-    is_classification=True,
-    num_classes=10,
-    num_proc=10,
+        model,
+        dataset,
+        name,
+        layer_names,
+        save_path=None,
+        batch_size=128,
+        is_classification=True,
+        num_classes=10,
+        num_proc=6,
 ):
     """Extract activation traces of dataset from model.
 
@@ -250,8 +248,8 @@ def _get_kdes(train_ats, train_pred, class_matrix, args):
             col_vectors = np.transpose(train_ats[class_matrix[label]])
             for i in range(col_vectors.shape[0]):
                 if (
-                    np.var(col_vectors[i]) < args.var_threshold
-                    and i not in removed_cols
+                        np.var(col_vectors[i]) < args.var_threshold
+                        and i not in removed_cols
                 ):
                     removed_cols.append(i)
 

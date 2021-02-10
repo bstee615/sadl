@@ -1,10 +1,8 @@
-import numpy as np
-import time
 import argparse
 
-from tqdm import tqdm
 from keras.datasets import mnist, cifar10
-from keras.models import load_model, Model
+from keras.models import load_model
+
 from sa import fetch_dsa, fetch_lsa, get_sc
 from utils import *
 
@@ -79,9 +77,9 @@ if __name__ == "__main__":
         model.summary()
 
         # You can select some layers you want to test.
-        # layer_names = ["activation_1"]
+        layer_names = ["activation_1"]
         # layer_names = ["activation_2"]
-        layer_names = ["activation_3"]
+        # layer_names = ["activation_3"]
 
         # Load target set.
         x_target = np.load("./adv/adv_mnist_{}.npy".format(args.target))
