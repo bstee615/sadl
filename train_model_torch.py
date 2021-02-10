@@ -1,4 +1,6 @@
 import argparse
+import os
+from collections import defaultdict
 
 import matplotlib.pyplot as plt
 import numpy as np
@@ -26,6 +28,10 @@ def train_torch(args):
     import torchvision.transforms as transforms
     from torch import nn
     import torch.nn.functional as F
+    import torch.optim as optim
+
+    device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
+    print(f'Training on {device}')  # Assuming that we are on a CUDA machine, this should print a CUDA device:
 
     if args.d == "mnist":
         transform = transforms.Compose(
@@ -82,46 +88,80 @@ def train_torch(args):
         # print labels
         print(' '.join('%5s' % classes[labels[j]] for j in range(4)))
 
-    import torch.optim as optim
-    net = Net()
-
-    criterion = nn.CrossEntropyLoss()
-    optimizer = optim.SGD(net.parameters(), lr=0.001, momentum=0.9)
-
-    for epoch in range(2):  # loop over the dataset multiple times
-
-        running_loss = 0.0
-        for i, data in enumerate(trainloader):
-            # get the inputs; data is a list of [inputs, labels]
-            inputs, labels = data
-
-            # zero the parameter gradients
-            optimizer.zero_grad()
-
-            # forward + backward + optimize
-            outputs = net.forward(inputs)
-            loss = criterion(outputs, labels)
-            loss.backward()
-            optimizer.step()
-
-            # print statistics
-            running_loss += loss.item()
-            if i % 2000 == 1999:  # print every 2000 mini-batches
-                print('[%d, %5d] loss: %.3f' %
-                      (epoch + 1, i + 1, running_loss / 2000))
-                running_loss = 0.0
-
-    print('Finished Training')
     PATH = './model/mnist_net.pth'
-    torch.save(net.state_dict(), PATH)
-    print(f'Saved to {PATH}')
 
-    dataiter = iter(testloader)
-    images, labels = next(dataiter)
+    net = Net()
+    if os.path.exists(PATH):
+        print(f'Loading already trained model found at {PATH}')
+        net.load_state_dict(torch.load(PATH))
+    else:
+        criterion = nn.CrossEntropyLoss()
+        optimizer = optim.SGD(net.parameters(), lr=0.001, momentum=0.9)
 
-    # print images
-    imshow(torchvision.utils.make_grid(images))
-    print('GroundTruth: ', ' '.join('%5s' % classes[labels[j]] for j in range(4)))
+        for epoch in range(2):  # loop over the dataset multiple times
+            running_loss = 0.0
+            for i, data in enumerate(trainloader):
+                # get the inputs; data is a list of [inputs, labels]
+                inputs, labels = data
+
+                # zero the parameter gradients
+                optimizer.zero_grad()
+
+                # forward + backward + optimize
+                outputs = net.forward(inputs)
+                loss = criterion(outputs, labels)
+                loss.backward()
+                optimizer.step()
+
+                # print statistics
+                running_loss += loss.item()
+                if i % 2000 == 1999:  # print every 2000 mini-batches
+                    print('[%d, %5d] loss: %.3f' %
+                          (epoch + 1, i + 1, running_loss / 2000))
+                    running_loss = 0.0
+
+        print('Finished Training')
+        torch.save(net.state_dict(), PATH)
+        print(f'Saved to {PATH}')
+
+    if args.test:
+        if args.debug:
+            dataiter = iter(testloader)
+            images, labels = next(dataiter)
+
+            # print images
+            imshow(torchvision.utils.make_grid(images))
+            output = net.forward(images)
+            _, pred = torch.max(output, 1)
+            print('GroundTruth: ', ' '.join('%5s' % classes[labels[j]] for j in range(4)))
+            print('Prediction:  ', ' '.join('%5s' % classes[pred[j]] for j in range(4)))
+
+        correct = 0
+        total = 0
+        with torch.no_grad():
+            for data in testloader:
+                images, labels = data
+                outputs = net.forward(images)
+                _, predicted = torch.max(outputs.data, 1)
+                total += labels.size(0)
+                correct += (predicted == labels).sum().item()
+        print('Accuracy of the network on the 10000 test images: %d %%' % (
+                100 * correct / total))
+
+        correct_by_class = defaultdict(int)
+        count_by_class = defaultdict(int)
+        with torch.no_grad():
+            for data in testloader:
+                images, labels = data
+                outputs = net.forward(images)
+                _, pred = torch.max(outputs.data, 1)
+                for i in range(images.shape[0]):
+                    my_class = labels[i].item()
+                    my_pred = pred[i].item()
+                    count_by_class[my_class] += 1
+                    correct_by_class[my_class] += 1 if (my_pred == my_class) else 0
+        for i in sorted(correct_by_class.keys()):
+            print(f'Accuracy of the network on class {i}: {100 * correct_by_class[i] / count_by_class[i]}')
 
 
 def train_keras(args):
@@ -220,6 +260,7 @@ if __name__ == "__main__":
     parser = argparse.ArgumentParser()
     parser.add_argument("-d", required=True, type=str)
     parser.add_argument("--debug", action='store_true')
+    parser.add_argument("--test", action='store_true')
     cmd_args = parser.parse_args()
     assert cmd_args.d in ["mnist", "cifar"], "Dataset should be either 'mnist' or 'cifar'"
 
