@@ -34,11 +34,17 @@ def train_torch(args):
     print(f'Training on {device}')  # Assuming that we are on a CUDA machine, this should print a CUDA device:
 
     if args.d == "mnist":
+        # https://discuss.pytorch.org/t/normalization-in-the-mnist-example/457
+        # https://github.com/pytorch/examples/blob/master/mnist/main.py
         transform = transforms.Compose(
             [transforms.ToTensor(),
-             transforms.Normalize((0.5,), (0.5,))])
+             # transforms.Normalize((0.1307,), (0.3081,))
+             # This causes abysmal performance (recognizes all digits as 2). TODO why?
+             transforms.Normalize((0.5,), (0.5,))
+             ])
 
         classes = list(range(10))
+        dataset = torchvision.datasets.MNIST
         conv_flat = 16 * 4 * 4
 
         class Net(nn.Module):
@@ -62,20 +68,22 @@ def train_torch(args):
     elif args.d == "cifar":
         transform = transforms.Compose(
             [transforms.ToTensor(),
-             transforms.Normalize((0.5, 0.5, 0.5), (0.5, 0.5, 0.5))])
+             transforms.Normalize((0.5, 0.5, 0.5), (0.5, 0.5, 0.5))
+             ])
         classes = ('plane', 'car', 'bird', 'cat',
                    'deer', 'dog', 'frog', 'horse', 'ship', 'truck')
-        raise NotImplementedError()
+        dataset = torchvision.datasets.CIFAR10
+        # raise NotImplementedError()
     else:
         raise NotImplementedError()
 
-    trainset = torchvision.datasets.MNIST(root='./data', train=True,
-                                          download=True, transform=transform)
+    trainset = dataset(root='./data', train=True,
+                       download=True, transform=transform)
     trainloader = torch.utils.data.DataLoader(trainset, batch_size=4,
                                               shuffle=True, num_workers=2)
 
-    testset = torchvision.datasets.MNIST(root='./data', train=False,
-                                         download=True, transform=transform)
+    testset = dataset(root='./data', train=False,
+                      download=True, transform=transform)
     testloader = torch.utils.data.DataLoader(testset, batch_size=4,
                                              shuffle=False, num_workers=2)
 
@@ -91,7 +99,7 @@ def train_torch(args):
     PATH = './model/mnist_net.pth'
 
     net = Net()
-    if os.path.exists(PATH):
+    if os.path.exists(PATH) and not args.force:
         print(f'Loading already trained model found at {PATH}')
         net.load_state_dict(torch.load(PATH))
     else:
@@ -261,6 +269,7 @@ if __name__ == "__main__":
     parser.add_argument("-d", required=True, type=str)
     parser.add_argument("--debug", action='store_true')
     parser.add_argument("--test", action='store_true')
+    parser.add_argument("--force", action='store_true')
     cmd_args = parser.parse_args()
     assert cmd_args.d in ["mnist", "cifar"], "Dataset should be either 'mnist' or 'cifar'"
 
