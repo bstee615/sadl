@@ -1,12 +1,13 @@
 import argparse
+import math
 import os
 from collections import defaultdict
 
 import matplotlib.pyplot as plt
 import numpy as np
 
-CLIP_MIN = -0.5
 CLIP_MAX = 0.5
+CLIP_MIN = -CLIP_MAX
 
 
 def imshow(img):
@@ -40,31 +41,59 @@ def train_torch(args):
             [transforms.ToTensor(),
              # transforms.Normalize((0.1307,), (0.3081,))
              # This causes abysmal performance (recognizes all digits as 2). TODO why?
-             transforms.Normalize((0.5,), (0.5,))
+             transforms.Normalize((0.5,), (0.5 / CLIP_MAX,))
              ])
 
         classes = list(range(10))
         dataset = torchvision.datasets.MNIST
-        conv_flat = 16 * 4 * 4
+
+        def conv_size(in_sz, kernel_size, stride):
+            """
+            Assume defaults for padding(0) and dilation(1)
+            """
+            return math.floor((in_sz - (kernel_size - 1) - 1) / stride) + 1
+
+        def num_flat_features(x):
+            size = x.size()[1:]  # all dimensions except the batch dimension
+            num_features = 1
+            for s in size:
+                num_features *= s
+            return num_features
 
         class Net(nn.Module):
             def __init__(self):
                 super(Net, self).__init__()
-                self.conv1 = nn.Conv2d(1, 6, 5)
-                self.pool = nn.MaxPool2d(2, 2)
-                self.conv2 = nn.Conv2d(6, 16, 5)
-                self.fc1 = nn.Linear(conv_flat, 120)
-                self.fc2 = nn.Linear(120, 84)
-                self.fc3 = nn.Linear(84, 10)
+
+                # Calculate shape from input to maxpool output
+                input_size = 28
+                conv1_output_size = conv_size(input_size, 3, 1)
+                conv2_output_size = conv_size(conv1_output_size, 3, 1)
+                maxpool_output_size = conv_size(conv2_output_size, 2, 2)
+                maxpool_output_flat = 64 * (maxpool_output_size ** 2)
+
+                self.conv1 = nn.Conv2d(1, 64, 3)
+                self.conv2 = nn.Conv2d(64, 64, 3)
+                self.pool = nn.MaxPool2d(2)
+                self.dropout1 = nn.Dropout(0.5)
+                self.fc1 = nn.Linear(maxpool_output_flat, 128)
+                self.dropout2 = nn.Dropout(0.5)
+                self.fc2 = nn.Linear(128, 10)
 
             def forward(self, x):
-                x = self.pool(F.relu(self.conv1(x)))
-                x = self.pool(F.relu(self.conv2(x)))
-                x = x.view(-1, conv_flat)
-                x = F.relu(self.fc1(x))
-                x = F.relu(self.fc2(x))
-                x = self.fc3(x)
+                x = self.conv1(x)
+                x = F.relu(x)
+                x = self.conv2(x)
+                x = F.relu(x)
+                x = self.pool(x)
+                x = self.dropout1(x)
+                x = x.view(-1, self.fc1.in_features)
+                x = self.fc1(x)
+                x = F.relu(x)
+                x = self.dropout2(x)
+                x = self.fc2(x)
+                x = F.softmax(x, dim=1)
                 return x
+
     elif args.d == "cifar":
         transform = transforms.Compose(
             [transforms.ToTensor(),
@@ -79,7 +108,7 @@ def train_torch(args):
 
     trainset = dataset(root='./data', train=True,
                        download=True, transform=transform)
-    trainloader = torch.utils.data.DataLoader(trainset, batch_size=4,
+    trainloader = torch.utils.data.DataLoader(trainset, batch_size=128,
                                               shuffle=True, num_workers=2)
 
     testset = dataset(root='./data', train=False,
@@ -96,7 +125,7 @@ def train_torch(args):
         # print labels
         print(' '.join('%5s' % classes[labels[j]] for j in range(4)))
 
-    PATH = './model/mnist_net.pth'
+    PATH = 'model/mnist_net_tutorial.pth'
 
     net = Net()
     if os.path.exists(PATH) and not args.force:
@@ -106,7 +135,8 @@ def train_torch(args):
         criterion = nn.CrossEntropyLoss()
         optimizer = optim.SGD(net.parameters(), lr=0.001, momentum=0.9)
 
-        for epoch in range(2):  # loop over the dataset multiple times
+        n_epochs = 50
+        for epoch in range(n_epochs):  # loop over the dataset multiple times
             running_loss = 0.0
             for i, data in enumerate(trainloader):
                 # get the inputs; data is a list of [inputs, labels]
@@ -123,9 +153,9 @@ def train_torch(args):
 
                 # print statistics
                 running_loss += loss.item()
-                if i % 2000 == 1999:  # print every 2000 mini-batches
+                if i % 50 == 0:  # print every 50 mini-batches
                     print('[%d, %5d] loss: %.3f' %
-                          (epoch + 1, i + 1, running_loss / 2000))
+                          (epoch, i, running_loss / 50))
                     running_loss = 0.0
 
         print('Finished Training')
@@ -270,7 +300,11 @@ if __name__ == "__main__":
     parser.add_argument("--debug", action='store_true')
     parser.add_argument("--test", action='store_true')
     parser.add_argument("--force", action='store_true')
+    parser.add_argument("--keras", action='store_true')
     cmd_args = parser.parse_args()
     assert cmd_args.d in ["mnist", "cifar"], "Dataset should be either 'mnist' or 'cifar'"
 
-    train_torch(cmd_args)
+    if cmd_args.keras:
+        train_keras(cmd_args)
+    else:
+        train_torch(cmd_args)
