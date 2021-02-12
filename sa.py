@@ -50,7 +50,7 @@ def get_ats(
     """Extract activation traces of dataset from model.
 
     Args:
-        model (keras model): Subject model.
+        model (keras or torch model): Subject model.
         dataset (list): Set of inputs fed into the model.
         name (str): Name of input set.
         layer_names (list): List of selected layer names.
@@ -64,25 +64,12 @@ def get_ats(
         ats (list): List of (layers, inputs, neuron outputs).
         pred (list): List of predicted classes.
     """
-
-    temp_model = Model(
-        inputs=model.input,
-        outputs=[model.get_layer(layer_name).output for layer_name in layer_names],
-    )
+    p = Pool(num_proc)
 
     prefix = info("[" + name + "] ")
     if is_classification:
-        p = Pool(num_proc)
         print(prefix + "Model serving")
-        pred = model.predict_classes(dataset, batch_size=batch_size, verbose=1)
-        if len(layer_names) == 1:
-            layer_outputs = [
-                temp_model.predict(dataset, batch_size=batch_size, verbose=1)
-            ]
-        else:
-            layer_outputs = temp_model.predict(
-                dataset, batch_size=batch_size, verbose=1
-            )
+        layer_outputs, pred = get_layer_outputs(model, layer_names, dataset, batch_size)
 
         print(prefix + "Processing ATs")
         ats = None
@@ -101,12 +88,31 @@ def get_ats(
             else:
                 ats = np.append(ats, layer_matrix, axis=1)
                 layer_matrix = None
+    else:
+        raise NotImplementedError()
 
     if save_path is not None:
         np.save(save_path[0], ats)
         np.save(save_path[1], pred)
 
     return ats, pred
+
+
+def get_layer_outputs(model, layer_names, dataset, batch_size):
+    temp_model = Model(
+        inputs=model.input,
+        outputs=[model.get_layer(layer_name).output for layer_name in layer_names],
+    )
+    pred = model.predict_classes(dataset, batch_size=batch_size, verbose=1)
+    if len(layer_names) == 1:
+        layer_outputs = [
+            temp_model.predict(dataset, batch_size=batch_size, verbose=1)
+        ]
+    else:
+        layer_outputs = temp_model.predict(
+            dataset, batch_size=batch_size, verbose=1
+        )
+    return layer_outputs, pred
 
 
 def find_closest_at(at, train_ats):
@@ -129,7 +135,7 @@ def _get_train_target_ats(model, x_train, x_target, target_name, layer_names, ar
     """Extract ats of train and target inputs. If there are saved files, then skip it.
 
     Args:
-        model (keras model): Subject model.
+        model (keras or torch model): Subject model.
         x_train (list): Set of training inputs.
         x_target (list): Set of target (test or adversarial) inputs.
         target_name (str): Name of target set.
@@ -188,7 +194,7 @@ def fetch_dsa(model, x_train, x_target, target_name, layer_names, args):
     """Distance-based SA
 
     Args:
-        model (keras model): Subject model.
+        model (keras or torch model): Subject model.
         x_train (list): Set of training inputs.
         x_target (list): Set of target (test or adversarial) inputs.
         target_name (str): Name of target set.
@@ -291,7 +297,7 @@ def fetch_lsa(model, x_train, x_target, target_name, layer_names, args):
     """Likelihood-based SA
 
     Args:
-        model (keras model): Subject model.
+        model (keras or torch model): Subject model.
         x_train (list): Set of training inputs.
         x_target (list): Set of target (test or[] adversarial) inputs.
         target_name (str): Name of target set.
