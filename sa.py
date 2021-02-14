@@ -1,8 +1,11 @@
 import os
+from collections import defaultdict
 from multiprocessing import Pool
 
+import torch
 from keras.models import Model
 from scipy.stats import gaussian_kde
+from torch import nn
 from tqdm import tqdm
 
 from utils import *
@@ -99,19 +102,54 @@ def get_ats(
 
 
 def get_layer_outputs(model, layer_names, dataset, batch_size):
-    temp_model = Model(
-        inputs=model.input,
-        outputs=[model.get_layer(layer_name).output for layer_name in layer_names],
-    )
-    pred = model.predict_classes(dataset, batch_size=batch_size, verbose=1)
-    if len(layer_names) == 1:
-        layer_outputs = [
-            temp_model.predict(dataset, batch_size=batch_size, verbose=1)
-        ]
-    else:
-        layer_outputs = temp_model.predict(
-            dataset, batch_size=batch_size, verbose=1
+    if isinstance(model, Model):
+        temp_model = Model(
+            inputs=model.input,
+            outputs=[model.get_layer(layer_name).output for layer_name in layer_names],
         )
+        pred = model.predict_classes(dataset, batch_size=batch_size, verbose=1)
+        if len(layer_names) == 1:
+            layer_outputs = [
+                temp_model.predict(dataset, batch_size=batch_size, verbose=1)
+            ]
+        else:
+            layer_outputs = temp_model.predict(
+                dataset, batch_size=batch_size, verbose=1
+            )
+    elif isinstance(model, nn.Module):
+        # Register activation hook to get intermediate layer outputs
+        activations = defaultdict(list)
+
+        def get_activation(name):
+            def hook(model, input, output):
+                activations[name].append(output.detach())
+
+            return hook
+
+        for name in layer_names:
+            model.__getattr__(name).register_forward_hook(get_activation(name))
+
+        with torch.no_grad():
+            # Forward pass
+            preds = []
+            for i, (images, labels) in enumerate(tqdm(dataset)):
+                images = images.to("cuda")
+                preds.append(model.forward(images).argmax(dim=1))
+            pred = torch.cat(preds, dim=0)
+
+            # Recollect activations in the same order as layer_names
+            layer_outputs = []
+            for name in layer_names:
+                layer_outputs.append(torch.cat(activations[name], dim=0))
+
+            pred = pred.cpu().numpy()
+            layer_outputs = [lo.cpu().numpy() for lo in layer_outputs]
+    else:
+        raise Exception('Please give a keras.engine.training.Model or a torch.nn.Module.')
+
+    # dataset is an ndarray of input data which defines N, shape N x [data_dims...]
+    # pred is an ndarray of predictions shape N
+    # layer_outputs is a list of ndarrays shape N x layer_names[i].output_shape
     return layer_outputs, pred
 
 
