@@ -5,9 +5,67 @@ from collections import defaultdict
 
 import matplotlib.pyplot as plt
 import numpy as np
+import tensorflow as tf
+import torch
+import torch.optim as optim
+import torchvision
+import torchvision.transforms as transforms
+from keras.datasets import mnist, cifar10
+from keras.layers import Dense, Dropout, Activation, Flatten, Conv2D, MaxPooling2D
+from keras.models import Sequential
+from keras.regularizers import l2
+from keras.utils import np_utils
+# from tensorflow_core.python.client import device_lib
+from torch import nn
+from torch.utils.data import DataLoader
 
 CLIP_MAX = 0.5
 CLIP_MIN = -CLIP_MAX
+
+
+def conv_size(in_sz, kernel_size, stride):
+    """
+    Assume defaults for padding(0) and dilation(1)
+    """
+    return math.floor((in_sz - (kernel_size - 1) - 1) / stride) + 1
+
+
+class MNISTNet(nn.Module):
+    def __init__(self):
+        # TODO make activations modules of this class
+        super(MNISTNet, self).__init__()
+
+        # Calculate shape from input to maxpool output
+        input_size = 28
+        conv1_output_size = conv_size(input_size, 3, 1)
+        conv2_output_size = conv_size(conv1_output_size, 3, 1)
+        maxpool_output_size = conv_size(conv2_output_size, 2, 2)
+        maxpool_output_flat = 64 * (maxpool_output_size ** 2)
+
+        self.conv1 = nn.Conv2d(1, 64, 3)
+        self.conv2 = nn.Conv2d(64, 64, 3)
+        self.pool = nn.MaxPool2d(2)
+        self.dropout1 = nn.Dropout(0.5)
+        self.fc1 = nn.Linear(maxpool_output_flat, 128)
+        self.dropout2 = nn.Dropout(0.5)
+        self.fc2 = nn.Linear(128, 10)
+        self.activation_1 = nn.ReLU()
+        self.activation_2 = nn.ReLU()
+        self.activation_3 = nn.ReLU()
+
+    def forward(self, x):
+        x = self.conv1(x)
+        x = self.activation_1(x)
+        x = self.conv2(x)
+        x = self.activation_2(x)
+        x = self.pool(x)
+        x = self.dropout1(x)
+        x = x.view(-1, self.fc1.in_features)
+        x = self.fc1(x)
+        x = self.activation_3(x)
+        x = self.dropout2(x)
+        x = self.fc2(x)
+        return x
 
 
 def imshow(img):
@@ -23,14 +81,6 @@ def train_torch(args):
     """
     # TODO: Change hyperparameters to those in original project
 
-    import torch
-    from torch.utils.data import DataLoader
-    import torchvision
-    import torchvision.transforms as transforms
-    from torch import nn
-    import torch.nn.functional as F
-    import torch.optim as optim
-
     device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
     print(f'Training on {device}')  # Assuming that we are on a CUDA machine, this should print a CUDA device:
 
@@ -39,61 +89,14 @@ def train_torch(args):
         # https://github.com/pytorch/examples/blob/master/mnist/main.py
         transform = transforms.Compose(
             [transforms.ToTensor(),
-             # transforms.Normalize((0.1307,), (0.3081,))
+             transforms.Normalize((0.1307,), (0.3081,))
              # This causes abysmal performance (recognizes all digits as 2). TODO why?
-             transforms.Normalize((0.5,), (0.5 / CLIP_MAX,))
+             # transforms.Normalize((0.5,), (0.5 / CLIP_MAX,)),
+             # transforms.Normalize((0.5,), (0.5,)),
              ])
 
         classes = list(range(10))
         dataset = torchvision.datasets.MNIST
-
-        def conv_size(in_sz, kernel_size, stride):
-            """
-            Assume defaults for padding(0) and dilation(1)
-            """
-            return math.floor((in_sz - (kernel_size - 1) - 1) / stride) + 1
-
-        def num_flat_features(x):
-            size = x.size()[1:]  # all dimensions except the batch dimension
-            num_features = 1
-            for s in size:
-                num_features *= s
-            return num_features
-
-        class Net(nn.Module):
-            def __init__(self):
-                # TODO make activations modules of this class
-                super(Net, self).__init__()
-
-                # Calculate shape from input to maxpool output
-                input_size = 28
-                conv1_output_size = conv_size(input_size, 3, 1)
-                conv2_output_size = conv_size(conv1_output_size, 3, 1)
-                maxpool_output_size = conv_size(conv2_output_size, 2, 2)
-                maxpool_output_flat = 64 * (maxpool_output_size ** 2)
-
-                self.conv1 = nn.Conv2d(1, 64, 3)
-                self.conv2 = nn.Conv2d(64, 64, 3)
-                self.pool = nn.MaxPool2d(2)
-                self.dropout1 = nn.Dropout(0.5)
-                self.fc1 = nn.Linear(maxpool_output_flat, 128)
-                self.dropout2 = nn.Dropout(0.5)
-                self.fc2 = nn.Linear(128, 10)
-
-            def forward(self, x):
-                x = self.conv1(x)
-                x = F.relu(x)
-                x = self.conv2(x)
-                x = F.relu(x)
-                x = self.pool(x)
-                x = self.dropout1(x)
-                x = x.view(-1, self.fc1.in_features)
-                x = self.fc1(x)
-                x = F.relu(x)
-                x = self.dropout2(x)
-                x = self.fc2(x)
-                x = F.softmax(x, dim=1)
-                return x
 
     elif args.d == "cifar":
         transform = transforms.Compose(
@@ -110,7 +113,7 @@ def train_torch(args):
     trainset = dataset(root='./data', train=True,
                        download=True, transform=transform)
     trainloader = torch.utils.data.DataLoader(trainset, batch_size=128,
-                                              shuffle=True, num_workers=2)
+                                              shuffle=True, num_workers=2, )
 
     testset = dataset(root='./data', train=False,
                       download=True, transform=transform)
@@ -126,22 +129,26 @@ def train_torch(args):
         # print labels
         print(' '.join('%5s' % classes[labels[j]] for j in range(4)))
 
-    PATH = 'model/mnist_net_tutorial.pth'
+    PATH = 'model/model_mnist.pth'
 
-    net = Net()
     if os.path.exists(PATH) and not args.force:
         print(f'Loading already trained model found at {PATH}')
-        net.load_state_dict(torch.load(PATH))
+        net = torch.load(PATH)
+        net.to(device)
     else:
+        net = MNISTNet()
+        net.to(device)
         criterion = nn.CrossEntropyLoss()
-        optimizer = optim.SGD(net.parameters(), lr=0.001, momentum=0.9)
+        optimizer = optim.Adadelta(net.parameters(), lr=0.001, rho=0.95, eps=1e-07)
 
         n_epochs = 50
+        # n_epochs = 10
         for epoch in range(n_epochs):  # loop over the dataset multiple times
-            running_loss = 0.0
             for i, data in enumerate(trainloader):
                 # get the inputs; data is a list of [inputs, labels]
                 inputs, labels = data
+                inputs = inputs.to(device)
+                labels = labels.to(device)
 
                 # zero the parameter gradients
                 optimizer.zero_grad()
@@ -153,14 +160,11 @@ def train_torch(args):
                 optimizer.step()
 
                 # print statistics
-                running_loss += loss.item()
-                if i % 50 == 0:  # print every 50 mini-batches
-                    print('[%d, %5d] loss: %.3f' %
-                          (epoch, i, running_loss / 50))
-                    running_loss = 0.0
+                if i % 3 == 1:
+                    print(f'[{epoch + 1}, {i * 128}]: {loss.item()}')
 
         print('Finished Training')
-        torch.save(net.state_dict(), PATH)
+        torch.save(net, PATH)
         print(f'Saved to {PATH}')
 
     if args.test:
@@ -180,6 +184,8 @@ def train_torch(args):
         with torch.no_grad():
             for data in testloader:
                 images, labels = data
+                images = images.to(device)
+                labels = labels.to(device)
                 outputs = net.forward(images)
                 _, predicted = torch.max(outputs.data, 1)
                 total += labels.size(0)
@@ -192,6 +198,8 @@ def train_torch(args):
         with torch.no_grad():
             for data in testloader:
                 images, labels = data
+                images = images.to(device)
+                labels = labels.to(device)
                 outputs = net.forward(images)
                 _, pred = torch.max(outputs.data, 1)
                 for i in range(images.shape[0]):
@@ -204,16 +212,8 @@ def train_torch(args):
 
 
 def train_keras(args):
-    import tensorflow as tf
-    from keras.datasets import mnist, cifar10
-    from keras.layers import Dense, Dropout, Activation, Flatten, Conv2D, MaxPooling2D
-    from keras.models import Sequential
-    from keras.regularizers import l2
-    from keras.utils import np_utils
-    from tensorflow_core.python.client import device_lib
-
     print('GPU available:', tf.test.is_gpu_available(), 'CUDA available:', tf.test.is_built_with_cuda())
-    print('devices:', device_lib.list_local_devices())
+    # print('devices:', device_lib.list_local_devices())
 
     if args.d == "mnist":
         (x_train, y_train), (x_test, y_test) = mnist.load_data()

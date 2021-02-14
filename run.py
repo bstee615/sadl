@@ -1,13 +1,19 @@
 import argparse
 
+import torch.utils.data
+import torchvision
 from keras.datasets import mnist, cifar10
 from keras.models import load_model
+from torchvision import transforms
 
 from sa import fetch_dsa, fetch_lsa, get_sc
+from train_model import MNISTNet
 from utils import *
 
-CLIP_MIN = -0.5
+print(MNISTNet)  # This keeps MNISTNet as not an unused variable
+
 CLIP_MAX = 0.5
+CLIP_MIN = -CLIP_MAX
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
@@ -62,48 +68,78 @@ if __name__ == "__main__":
         type=bool,
         default=True,
     )
+    parser.add_argument(
+        "--keras",
+        help="should use Keras",
+        action='store_true'
+    )
     args = parser.parse_args()
     assert args.d in ["mnist", "cifar"], "Dataset should be either 'mnist' or 'cifar'"
     assert args.lsa ^ args.dsa, "Select either 'lsa' or 'dsa'"
     print(args)
 
     if args.d == "mnist":
-        (x_train, y_train), (x_test, y_test) = mnist.load_data()
-        x_train = x_train.reshape(-1, 28, 28, 1)
-        x_test = x_test.reshape(-1, 28, 28, 1)
+        if args.keras:
+            (x_train, _), (x_test, _) = mnist.load_data()
+            x_train = x_train.reshape(-1, 28, 28, 1)
+            x_test = x_test.reshape(-1, 28, 28, 1)
 
-        # Load pre-trained model.
-        model = load_model("./model/model_mnist.h5")
-        model.summary()
+            # Load pre-trained model.
+            model = load_model("model/model_mnist_50.h5")
+            model.summary()
+
+            # Normalize
+            x_train = x_train.astype("float32")
+            x_train = (x_train / 255.0) - (1.0 - CLIP_MAX)
+            x_test = x_test.astype("float32")
+            x_test = (x_test / 255.0) - (1.0 - CLIP_MAX)
+        else:
+            transform = transforms.Compose(
+                [transforms.ToTensor(),
+                 transforms.Normalize((0.5,), (0.5 / CLIP_MAX,))
+                 ])
+            trainset = torchvision.datasets.MNIST(root='./data', train=True,
+                                                  download=True, transform=transform)
+            testset = torchvision.datasets.MNIST(root='./data', train=False,
+                                                 download=True, transform=transform)
+            x_train = torch.utils.data.DataLoader(trainset, batch_size=args.batch_size, shuffle=False)
+            x_test = torch.utils.data.DataLoader(testset, batch_size=args.batch_size, shuffle=False)
+            # TODO: transform Torch tensors to Numpy
+            model = torch.load('./model/model_mnist.pth')
+            print(model)
 
         # You can select some layers you want to test.
-        layer_names = ["activation_1"]
+        # layer_names = ["activation_1"]
         # layer_names = ["activation_2"]
-        # layer_names = ["activation_3"]
+        layer_names = ["activation_3"]
 
         # Load target set.
         x_target = np.load("./adv/adv_mnist_{}.npy".format(args.target))
 
     elif args.d == "cifar":
-        (x_train, y_train), (x_test, y_test) = cifar10.load_data()
+        if args.keras:
+            (x_train, y_train), (x_test, y_test) = cifar10.load_data()
 
-        model = load_model("./model/model_cifar.h5")
-        model.summary()
+            model = load_model("./model/model_cifar.h5")
+            model.summary()
 
-        # layer_names = [
-        #     layer.name
-        #     for layer in model.layers
-        #     if ("activation" in layer.name or "pool" in layer.name)
-        #     and "activation_9" not in layer.name
-        # ]
-        layer_names = ["activation_6"]
+            # layer_names = [
+            #     layer.name
+            #     for layer in model.layers
+            #     if ("activation" in layer.name or "pool" in layer.name)
+            #     and "activation_9" not in layer.name
+            # ]
+            layer_names = ["activation_6"]
+
+            # Normalize
+            x_train = x_train.astype("float32")
+            x_train = (x_train / 255.0) - (1.0 - CLIP_MAX)
+            x_test = x_test.astype("float32")
+            x_test = (x_test / 255.0) - (1.0 - CLIP_MAX)
+        else:
+            raise NotImplementedError()
 
         x_target = np.load("./adv/adv_cifar_{}.npy".format(args.target))
-
-    x_train = x_train.astype("float32")
-    x_train = (x_train / 255.0) - (1.0 - CLIP_MAX)
-    x_test = x_test.astype("float32")
-    x_test = (x_test / 255.0) - (1.0 - CLIP_MAX)
 
     if args.lsa:
         test_lsa = fetch_lsa(model, x_train, x_test, "test", layer_names, args)
